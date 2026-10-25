@@ -32,10 +32,9 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { message, image } = req.body;
     const lowerMsg = (message || '').toLowerCase();
-
-    // 1. GERADOR DE IMAGENS (Pollinations AI com fallback se lotar)
-    const palavrasChave = ['cria', 'crie', 'gere', 'gerar', 'desenhe', 'faça', 'faca', 'mostre', 'foto'];
-    const querImagem = palavrasChave.some(p => lowerMsg.includes(p)) && (lowerMsg.includes('foto') || lowerMsg.includes('imagem') || lowerMsg.includes('desenho') || lowerMsg.includes('pato'));
+// 1. GERADOR DE IMAGENS (Pollinations AI atualizado)
+    const palavrasChave = ['cria', 'crie', 'gere', 'gerar', 'desenhe', 'faça', 'faca', 'mostre', 'foto', 'adiciona', 'adicione', 'coloca', 'põe', 'poe'];
+    const querImagem = palavrasChave.some(p => lowerMsg.includes(p)) && (lowerMsg.includes('foto') || lowerMsg.includes('imagem') || lowerMsg.includes('desenho') || lowerMsg.includes('pato') || lowerMsg.includes('cabelo'));
 
     if (querImagem && !image) {
       let promptLimpo = message
