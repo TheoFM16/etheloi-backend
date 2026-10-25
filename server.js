@@ -7,8 +7,6 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-// Variável para guardar o último assunto gerado (permite edições tipo "adiciona cabelo")
 let ultimoPromptCriado = "pato";
 
 app.post('/api/chat', async (req, res) => {
@@ -16,48 +14,53 @@ app.post('/api/chat', async (req, res) => {
     const { message } = req.body;
     const lowerMsg = (message || '').toLowerCase();
 
-    // 1. GERADOR DE IMAGENS INTELIGENTE
-    const palavrasChave = ['cria', 'crie', 'gere', 'gerar', 'desenhe', 'faça', 'faca', 'mostre', 'foto', 'adiciona', 'adicione', 'coloca', 'põe', 'poe'];
-    const querImagem = palavrasChave.some(p => lowerMsg.includes(p)) || lowerMsg.includes('cabelo') || lowerMsg.includes('anime');
+    // 1. DETECÇÃO RIGOROSA DE IMAGEM (Só dispara se houver intenção explícita de criar/desenhar)
+    const verbosCriacao = ['cria ', 'crie ', 'gere ', 'gerar ', 'desenhe ', 'desenhar ', 'faça uma', 'faca uma', 'mostre uma', 'quero ver'];
+    const temVerbo = verbosCriacao.some(v => lowerMsg.includes(v));
+    const temTemaVisual = lowerMsg.includes('foto') || lowerMsg.includes('imagem') || lowerMsg.includes('desenho') || lowerMsg.includes('pato') || lowerMsg.includes('anime');
+
+    const querImagem = temVerbo && temTemaVisual;
 
     if (querImagem) {
-      // Se o usuário pediu para adicionar algo ao último objeto (ex: "adiciona cabelo de anime nele")
       if ((lowerMsg.includes('adiciona') || lowerMsg.includes('coloca') || lowerMsg.includes('põe') || lowerMsg.includes('cabelo')) && ultimoPromptCriado) {
-        ultimoPromptCriado = `${ultimoPromptCriado} with ${message}, high quality, detailed anime style`;
+        ultimoPromptCriado = `${ultimoPromptCriado} with ${message}, detailed anime style`;
       } else {
-        // Limpa o comando e guarda o novo foco
         ultimoPromptCriado = message
-          .replace(/(cria|crie|gere|gerar|desenhe|faça|faca|mostre|adiciona|adicione|coloca|põe)\s+(uma|um)?\s*(foto|imagem|desenho)?\s*(de|do|da|sobre|pra mim|para mim|nele)?/gi, '')
+          .replace(/(cria|crie|gere|gerar|desenhe|faça|faca|mostre)\s+(uma|um)?\s*(foto|imagem|desenho)?\s*(de|do|da|sobre|pra mim|para mim)?/gi, '')
           .trim();
         if (!ultimoPromptCriado) ultimoPromptCriado = message;
       }
 
       const encodedPrompt = encodeURIComponent(ultimoPromptCriado);
-      // Usamos parâmetros otimizados do Pollinations para carregar mais rápido e sem travar
-      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&enhance=true&seed=${Math.floor(Math.random() * 999999)}`;
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=600&nologo=true&seed=${Math.floor(Math.random() * 999999)}`;
 
       return res.json({ 
-        reply: `Aqui está! Aplicado: *"${ultimoPromptCriado}"*\n\n![Imagem Gerada](${imageUrl})` 
+        reply: `Aqui está! 🎨\n\n![Imagem Gerada](${imageUrl})` 
       });
     }
 
-    // 2. CHAMADA AO GEMINI PARA TEXTO COMUM
+    // 2. CHAT DE TEXTO NORMAL (Vai direto para o Gemini sem frescura)
     const geminiRes = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [{
-          parts: [{ text: `Tu és o Etheloi, uma IA criada pelo Theo. Responde sempre em Português de forma direta e útil.\n\nUsuário: ${message}` }]
+          parts: [{ text: `Tu és o Etheloi, uma inteligência artificial avançada criada pelo Theo. Responde sempre em Português de forma direta, útil e amigável. Sê prestativo com programação, Roblox e jogos.\n\nUsuário: ${message}` }]
         }]
       },
-      { timeout: 8000 }
+      { timeout: 10000 }
     );
 
     const respostaTexto = geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return res.json({ reply: respostaTexto || "Mestre, recebi uma resposta vazia. Tenta de novo!" });
+
+    if (respostaTexto) {
+      return res.json({ reply: respostaTexto });
+    } else {
+      return res.json({ reply: "Mestre, recebi uma resposta vazia. Tenta mandar novamente!" });
+    }
 
   } catch (error) {
     console.error("Erro no chat:", error.message);
-    return res.json({ reply: "Eita, o servidor deu uma engasgada. Manda a mensagem de novo!" });
+    return res.json({ reply: "Opa, ocorreu uma instabilidade rápida ao falar com o Gemini. Manda de novo!" });
   }
 });
 
