@@ -9,7 +9,7 @@ app.use(express.json({ limit: '10mb' }));
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TAVILY_API_KEY = "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";
 
-// Função de Busca Web com Tavily
+// Função de Busca Web com Tavily (Blindada contra falhas)
 async function buscarNaWeb(query) {
   try {
     const response = await axios.post("https://api.tavily.com/search", {
@@ -17,13 +17,13 @@ async function buscarNaWeb(query) {
       query: query,
       search_depth: "basic",
       max_results: 3
-    });
+    }, { timeout: 5000 });
 
     if (response.data && response.data.results && response.data.results.length > 0) {
       return response.data.results.map(r => `- ${r.title}: ${r.content}`).join("\n");
     }
   } catch (err) {
-    console.error("Erro na busca Tavily:", err.message);
+    console.error("Aviso: Falha na busca Tavily:", err.message);
   }
   return "";
 }
@@ -33,7 +33,7 @@ app.post('/api/chat', async (req, res) => {
     const { message, image } = req.body;
     const lowerMsg = (message || '').toLowerCase();
 
-    // 1. GERADOR DE IMAGENS (Pollinations AI)
+    // 1. GERADOR DE IMAGENS (Pollinations AI com fallback se lotar)
     const palavrasChave = ['cria', 'crie', 'gere', 'gerar', 'desenhe', 'faça', 'faca', 'mostre', 'foto'];
     const querImagem = palavrasChave.some(p => lowerMsg.includes(p)) && (lowerMsg.includes('foto') || lowerMsg.includes('imagem') || lowerMsg.includes('desenho') || lowerMsg.includes('pato'));
 
@@ -45,25 +45,26 @@ app.post('/api/chat', async (req, res) => {
       if (!promptLimpo) promptLimpo = message;
 
       const encodedPrompt = encodeURIComponent(promptLimpo);
-      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=600&nologo=true`;
+      // Usamos um modelo alternativo ou seed para tentar evitar o limite fixo se lotar
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=600&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
 
       return res.json({ 
-        reply: `Aqui está a imagem que criei para ti!\n\n![Imagem Gerada](${imageUrl})` 
+        reply: `Aqui está a imagem que criei para ti!\n\n*(Nota: Se aparecer aviso de limite no Pollinations, atualiza a imagem em segundos)*\n\n![Imagem Gerada](${imageUrl})` 
       });
     }
 
-    // 2. BUSCA NA WEB COM TAVILY (Se precisar de factos reais)
+    // 2. BUSCA NA WEB COM TAVILY (Opcional, só se necessário)
     let contextoWeb = "";
-    const precisaPesquisa = lowerMsg.includes('scp') || lowerMsg.includes('quem é') || lowerMsg.includes('pesquise') || lowerMsg.includes('notícia') || lowerMsg.includes('quanto foi');
+    const precisaPesquisa = lowerMsg.includes('scp') || lowerMsg.includes('quem é') || lowerMsg.includes('pesquise') || lowerMsg.includes('notícia') || lowerMsg.includes('roblox') || lowerMsg.includes('jogo');
     
     if (precisaPesquisa && !image) {
       contextoWeb = await buscarNaWeb(message);
     }
 
-    // 3. CHAMADA DIRETA À API DO GEMINI VIA AXIOS
+    // 3. CHAMADA À API DO GEMINI
     let promptFinal = message;
     if (contextoWeb) {
-      promptFinal = `Com base nestes dados reais da web:\n${contextoWeb}\n\nResponda à pergunta do usuário: ${message}`;
+      promptFinal = `Com base nestes dados da web:\n${contextoWeb}\n\nResponda à pergunta do usuário: ${message}`;
     }
 
     let contents = [{
@@ -71,7 +72,6 @@ app.post('/api/chat', async (req, res) => {
       parts: [{ text: promptFinal }]
     }];
 
-    // Se houver imagem em Base64
     if (image) {
       const matches = image.match(/^data:(.+);base64,(.+)$/);
       if (matches && matches.length === 3) {
@@ -89,19 +89,21 @@ app.post('/api/chat', async (req, res) => {
       {
         contents: contents,
         systemInstruction: {
-          parts: [{ text: "Tu és o Etheloi, uma inteligência artificial avançada criada pelo Theo. Responde sempre em Português de forma direta, clara e precisa." }]
+          parts: [{ text: "Tu és o Etheloi, uma IA avançada criada pelo Theo. Responde sempre em Português de forma direta, clara e prestativa. Especialmente sobre jogos como Roblox, dá ótimas recomendações." }]
         }
-      }
+      },
+      { timeout: 10000 }
     );
 
     const candidate = geminiResponse.data?.candidates?.[0];
-    const textoResposta = candidate?.content?.parts?.[0]?.text || "Opa, ocorreu uma instabilidade. Pode repetir, mestre?";
+    const textoResposta = candidate?.content?.parts?.[0]?.text || "Opa, recebi uma resposta vazia. Pode repetir, mestre?";
 
     res.json({ reply: textoResposta });
 
   } catch (error) {
-    console.error("Erro no servidor:", error.response?.data || error.message);
-    res.status(500).json({ error: "Erro interno no servidor." });
+    console.error("Erro crítico no servidor:", error.response?.data || error.message);
+    // Nunca mais dá crash na tela do usuário, devolve um aviso amigável
+    res.json({ reply: "⚠️ Ocorreu uma instabilidade momentânea ao processar o seu pedido. Pode enviar novamente!" });
   }
 });
 
