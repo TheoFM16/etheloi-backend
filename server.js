@@ -34,7 +34,7 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // 2. CHAT DE TEXTO COM GEMINI
+    // 2. CHAT DE TEXTO COM GEMINI (Usando o modelo gemini-3.8-flash)
     let parts = [{ text: `Tu és o Etheloi, uma inteligência artificial avançada criada pelo Theo. Responde sempre em Português de forma direta, útil e amigável. Sê prestativo com programação, Roblox e jogos.\n\nUsuário: ${message}` }];
 
     if (image) {
@@ -50,7 +50,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [{
           role: "user",
@@ -65,7 +65,7 @@ app.post('/api/chat', async (req, res) => {
     if (respostaTexto) {
       return res.json({ reply: respostaTexto });
     } else {
-      return res.json({ reply: "Mestre, recebi uma resposta vazia do Gemini. Tenta mandar novamente!" });
+      return res.json({ reply: "Mestre, recebi uma resposta vazia. Tenta mandar novamente!" });
     }
 
   } catch (error) {
