@@ -1,87 +1,113 @@
-const express = require('express');
-const cors = require('cors');
+import express from 'express';
+import cors from 'cors';
+import { GoogleGenAI } from '@google/genai';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
-const GROQ_API_KEY = "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";
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const TAVILY_API_KEY = "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";
 
-// Módulo de pesquisa com as varas corretas do Fisch (Masterline Doomsekkar & Fabulous)
-async function pesquisarDadosReais(query) {
-  const cleanQuery = query.toLowerCase().trim();
-  
-  if (cleanQuery.includes("fisch") || cleanQuery.includes("vara")) {
-    return `[DADOS OFICIAIS DO JOGO FISCH - ROBLOX]:
-- As Melhores e Mais Fortes Varas do Fisch:
-  1. Masterline (Uma das mais apelonas e fortes de todo o jogo, sorte e atributos insanos)
-  2. Fabulous Rod (Extremamente apelona para peixes lendários, mitológicos e raros)
-  3. Doomsekkar (Altíssima sorte para peixes Secretos)
-  4. Pinion's Aria (Excelente para peixes pesados e raridades altas)
-  5. Castbound`;
+// Função para buscar na web usando Tavily
+async function buscarNaWeb(query) {
+  try {
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: TAVILY_API_KEY,
+        query: query,
+        search_depth: "basic",
+        max_results: 3
+      })
+    });
+    const data = await response.json();
+    if (data.results && data.results.length > 0) {
+      return data.results.map(r => `- ${r.title}: ${r.content}`).join("\n");
+    }
+  } catch (err) {
+    console.error("Erro na busca Tavily:", err);
   }
-
-  if (cleanQuery.includes("blox fruits") || cleanQuery.includes("fruta")) {
-    return `[DADOS OFICIAIS DO JOGO BLOX FRUITS - ROBLOX]:
-- Melhores Frutas para PvP: Dragon, Kitsune, Leopard, Dough (Despertada), Portal.
-- Melhores Frutas para Farm/PvE/Missões: Buddha (A melhor de longe para farm), Magma (Despertada), Blizzard, Ice.`;
-  }
-
   return "";
 }
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, history } = req.body;
+    const { message, image } = req.body;
+    const lowerMsg = (message || '').toLowerCase();
 
-    const contextoWeb = await pesquisarDadosReais(message);
+    // 1. GERADOR DE IMAGENS (Pollinations AI)
+    const palavrasChave = ['cria', 'crie', 'gere', 'gerar', 'desenhe', 'faça', 'faca', 'mostre', 'foto'];
+    const querImagem = palavrasChave.some(p => lowerMsg.includes(p)) && (lowerMsg.includes('foto') || lowerMsg.includes('imagem') || lowerMsg.includes('desenho') || lowerMsg.includes('pato'));
 
-    const systemPrompt = `Você é EXCLUSIVAMENTE o Etheloi, uma inteligência artificial moderna, ultra-rápida, direta e objetiva, criada exclusivamente pelo Theo.
-Regras estritas:
-1. Você NÃO é o ChatGPT e NÃO foi desenvolvido pela OpenAI. Você é o Etheloi, criado por Theo.
-2. NUNCA invente itens ou nomes falsos de jogos. Use estritamente as informações reais da pesquisa enviadas junto com a pergunta quando houver.
-3. Se o usuário perguntar o significado de alguma gíria da internet, responda e explique normalmente.
-4. Seja sempre direto ao ponto, organizado em tópicos e tabelas limpas quando necessário, sem enrolação.`;
+    if (querImagem && !image) {
+      let promptLimpo = message
+        .replace(/(cria|crie|gere|gerar|desenhe|faça|faca|mostre)\s+(uma|um)?\s*(foto|imagem|desenho)?\s*(de|do|da|sobre|pra mim|para mim)?/gi, '')
+        .trim();
 
-    const finalUserMessage = contextoWeb 
-      ? `${contextoWeb}\n\n[Pergunta do Usuário]: ${message}\n(Responda utilizando os dados reais acima se for sobre o assunto)`
-      : message;
+      if (!promptLimpo) promptLimpo = message;
 
-    const messagesToSend = [
-      { role: "system", content: systemPrompt },
-      ...(history || []),
-      { role: "user", content: finalUserMessage }
-    ];
+      const encodedPrompt = encodeURIComponent(promptLimpo);
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=600&nologo=true`;
 
-    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "openai/gpt-oss-20b",
-        messages: messagesToSend,
-        temperature: 0.4
-      })
-    });
-
-    const data = await groqResponse.json();
-
-    if (!groqResponse.ok) {
-      throw new Error(data.error?.message || "Erro na API do Groq");
+      return res.json({ 
+        reply: `Aqui está a imagem que criei para ti!\n\n![Imagem Gerada](${imageUrl})` 
+      });
     }
 
-    const reply = data.choices[0].message.content;
-    res.json({ reply });
+    // 2. BUSCA NA WEB COM TAVILY (Se a pergunta parecer pedir factos/pesquisa)
+    let contextoWeb = "";
+    const precisaPesquisa = lowerMsg.includes('scp') || lowerMsg.includes('quem é') || lowerMsg.includes('pesquise') || lowerMsg.includes('notícia') || lowerMsg.includes('quanto foi') || lowerMsg.includes('como funciona');
+    
+    if (precisaPesquisa && !image) {
+      contextoWeb = await buscarNaWeb(message);
+    }
+
+    // 3. CONSTRUÇÃO DO PROMPT PARA O GEMINI
+    let contents = [];
+    let promptFinal = message;
+
+    if (contextoWeb) {
+      promptFinal = `Com base nestes dados da web:\n${contextoWeb}\n\nResponda à pergunta do usuário: ${message}`;
+    }
+
+    let currentParts = [{ text: promptFinal }];
+
+    if (image) {
+      const matches = image.match(/^data:(.+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        currentParts.push({
+          inlineData: {
+            mimeType: matches[1],
+            data: matches[2]
+          }
+        });
+      }
+    }
+
+    contents.push({ role: 'user', parts: currentParts });
+
+    const config = {
+      systemInstruction: "Tu és o Etheloi, uma inteligência artificial avançada criada pelo Theo. Responde sempre em Português de forma direta, clara e detalhada."
+    };
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: contents,
+      config: config
+    });
+
+    const textoFinal = response.text || "Opa, ocorreu uma instabilidade. Pode repetir, mestre?";
+    res.json({ reply: textoFinal });
 
   } catch (error) {
     console.error("Erro no servidor:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message || "Erro interno no servidor." });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor do Etheloi rodando na porta ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
