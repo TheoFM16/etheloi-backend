@@ -9,100 +9,76 @@ app.use(express.json({ limit: '10mb' }));
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TAVILY_API_KEY = "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";
 
-// Função de Busca Web com Tavily (Blindada contra falhas)
-async function buscarNaWeb(query) {
-  try {
-    const response = await axios.post("https://api.tavily.com/search", {
-      api_key: TAVILY_API_KEY,
-      query: query,
-      search_depth: "basic",
-      max_results: 3
-    }, { timeout: 5000 });
-
-    if (response.data && response.data.results && response.data.results.length > 0) {
-      return response.data.results.map(r => `- ${r.title}: ${r.content}`).join("\n");
-    }
-  } catch (err) {
-    console.error("Aviso: Falha na busca Tavily:", err.message);
-  }
-  return "";
-}
-
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, image } = req.body;
     const lowerMsg = (message || '').toLowerCase();
-// 1. GERADOR DE IMAGENS (Pollinations AI atualizado)
+
+    // 1. GERADOR DE IMAGENS (Pollinations AI)
     const palavrasChave = ['cria', 'crie', 'gere', 'gerar', 'desenhe', 'faça', 'faca', 'mostre', 'foto', 'adiciona', 'adicione', 'coloca', 'põe', 'poe'];
-    const querImagem = palavrasChave.some(p => lowerMsg.includes(p)) && (lowerMsg.includes('foto') || lowerMsg.includes('imagem') || lowerMsg.includes('desenho') || lowerMsg.includes('pato') || lowerMsg.includes('cabelo'));
+    const querImagem = palavrasChave.some(p => lowerMsg.includes(p)) && (lowerMsg.includes('foto') || lowerMsg.includes('imagem') || lowerMsg.includes('desenho') || lowerMsg.includes('pato') || lowerMsg.includes('cabelo') || lowerMsg.includes('anime'));
 
     if (querImagem && !image) {
       let promptLimpo = message
-        .replace(/(cria|crie|gere|gerar|desenhe|faça|faca|mostre)\s+(uma|um)?\s*(foto|imagem|desenho)?\s*(de|do|da|sobre|pra mim|para mim)?/gi, '')
+        .replace(/(cria|crie|gere|gerar|desenhe|faça|faca|mostre|adiciona|adicione|coloca|põe)\s+(uma|um)?\s*(foto|imagem|desenho)?\s*(de|do|da|sobre|pra mim|para mim|nele)?/gi, '')
         .trim();
 
       if (!promptLimpo) promptLimpo = message;
 
       const encodedPrompt = encodeURIComponent(promptLimpo);
-      // Usamos um modelo alternativo ou seed para tentar evitar o limite fixo se lotar
       const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=600&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
 
       return res.json({ 
-        reply: `Aqui está a imagem que criei para ti!\n\n*(Nota: Se aparecer aviso de limite no Pollinations, atualiza a imagem em segundos)*\n\n![Imagem Gerada](${imageUrl})` 
+        reply: `Aqui está a imagem! 🎨\n\n![Imagem Gerada](${imageUrl})` 
       });
     }
 
-    // 2. BUSCA NA WEB COM TAVILY (Opcional, só se necessário)
+    // 2. BUSCA WEB COM TAVILY (Opcional para perguntas gerais)
     let contextoWeb = "";
-    const precisaPesquisa = lowerMsg.includes('scp') || lowerMsg.includes('quem é') || lowerMsg.includes('pesquise') || lowerMsg.includes('notícia') || lowerMsg.includes('roblox') || lowerMsg.includes('jogo');
-    
-    if (precisaPesquisa && !image) {
-      contextoWeb = await buscarNaWeb(message);
-    }
-
-    // 3. CHAMADA À API DO GEMINI
-    let promptFinal = message;
-    if (contextoWeb) {
-      promptFinal = `Com base nestes dados da web:\n${contextoWeb}\n\nResponda à pergunta do usuário: ${message}`;
-    }
-
-    let contents = [{
-      role: "user",
-      parts: [{ text: promptFinal }]
-    }];
-
-    if (image) {
-      const matches = image.match(/^data:(.+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        contents[0].parts.push({
-          inlineData: {
-            mimeType: matches[1],
-            data: matches[2]
-          }
-        });
+    if (lowerMsg.includes('scp') || lowerMsg.includes('roblox') || lowerMsg.includes('pesquise') || lowerMsg.includes('notícia')) {
+      try {
+        const tavilyRes = await axios.post("https://api.tavily.com/search", {
+          api_key: TAVILY_API_KEY,
+          query: message,
+          search_depth: "basic",
+          max_results: 2
+        }, { timeout: 4000 });
+        
+        if (tavilyRes.data?.results) {
+          contextoWeb = tavilyRes.data.results.map(r => r.content).join("\n");
+        }
+      } catch (e) {
+        console.log("Aviso Tavily ignorado");
       }
     }
 
-    const geminiResponse = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    // 3. CHAMADA DIRETA AO GEMINI (Modelo Flash 1.5 ou 2.0)
+    let promptFinal = message;
+    if (contextoWeb) {
+      promptFinal = `Com base nestes dados da web:\n${contextoWeb}\n\nResponda: ${message}`;
+    }
+
+    const geminiRes = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
-        contents: contents,
-        systemInstruction: {
-          parts: [{ text: "Tu és o Etheloi, uma IA avançada criada pelo Theo. Responde sempre em Português de forma direta, clara e prestativa. Especialmente sobre jogos como Roblox, dá ótimas recomendações." }]
-        }
+        contents: [{
+          parts: [{ text: `Tu és o Etheloi, uma IA criada pelo Theo. Responde sempre em Português de forma direta e útil.\n\nUsuário: ${promptFinal}` }]
+        }]
       },
-      { timeout: 10000 }
+      { timeout: 8000 }
     );
 
-    const candidate = geminiResponse.data?.candidates?.[0];
-    const textoResposta = candidate?.content?.parts?.[0]?.text || "Opa, recebi uma resposta vazia. Pode repetir, mestre?";
+    const respostaTexto = geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    res.json({ reply: textoResposta });
+    if (respostaTexto) {
+      return res.json({ reply: respostaTexto });
+    } else {
+      return res.json({ reply: "Opa mestre, recebi uma resposta vazia do modelo. Tenta mandar novamente!" });
+    }
 
   } catch (error) {
-    console.error("Erro crítico no servidor:", error.response?.data || error.message);
-    // Nunca mais dá crash na tela do usuário, devolve um aviso amigável
-    res.json({ reply: "⚠️ Ocorreu uma instabilidade momentânea ao processar o seu pedido. Pode enviar novamente!" });
+    console.error("Erro no chat:", error.response?.data || error.message);
+    return res.json({ reply: "Eita, o servidor engasgou aqui agora. Manda a pergunta de novo!" });
   }
 });
 
