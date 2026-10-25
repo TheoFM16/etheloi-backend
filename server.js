@@ -34,7 +34,7 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // 2. CHAT DE TEXTO COM GEMINI (Usando gemini-1.5-flash)
+    // 2. CHAT DE TEXTO COM GEMINI
     let parts = [{ text: `Tu és o Etheloi, uma inteligência artificial avançada criada pelo Theo. Responde sempre em Português de forma direta, útil e amigável. Sê prestativo com programação, Roblox e jogos.\n\nUsuário: ${message}` }];
 
     if (image) {
