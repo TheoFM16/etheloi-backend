@@ -8,6 +8,28 @@ app.use(express.json({ limit: '10mb' }));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+// Função para tentar chamar o Gemini com diferentes modelos caso um esteja sobrecarregado
+async function chamarGeminiComFallback(contents) {
+  // Lista de modelos para tentar em ordem de preferência
+  const modelos = ['gemini-3.8-flash', 'gemini-1.5-flash'];
+
+  for (const modelo of modelos) {
+    try {
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`,
+        { contents: [{ role: "user", parts: contents }] },
+        { timeout: 12000 }
+      );
+
+      const texto = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (texto) return texto;
+    } catch (error) {
+      console.log(`Modelo ${modelo} falhou ou com alta demanda, testando próximo...`);
+    }
+  }
+  return null;
+}
+
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, image } = req.body;
@@ -34,7 +56,7 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // 2. CHAT DE TEXTO COM GEMINI (Usando o modelo gemini-3.8-flash)
+    // 2. CHAT DE TEXTO COM O SISTEMA DE FALLBACK
     let parts = [{ text: `Tu és o Etheloi, uma inteligência artificial avançada criada pelo Theo. Responde sempre em Português de forma direta, útil e amigável. Sê prestativo com programação, Roblox e jogos.\n\nUsuário: ${message}` }];
 
     if (image) {
@@ -49,29 +71,17 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        contents: [{
-          role: "user",
-          parts: parts
-        }]
-      },
-      { timeout: 15000 }
-    );
-
-    const respostaTexto = geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const respostaTexto = await chamarGeminiComFallback(parts);
 
     if (respostaTexto) {
       return res.json({ reply: respostaTexto });
     } else {
-      return res.json({ reply: "Mestre, recebi uma resposta vazia. Tenta mandar novamente!" });
+      return res.json({ reply: "⚠️ Os servidores do Gemini estão com alta demanda no momento. Tenta enviar a mensagem novamente em instantes!" });
     }
 
   } catch (error) {
-    console.error("Erro detalhado no chat:", error.response?.data || error.message);
-    const detalheErro = error.response?.data?.error?.message || error.message;
-    return res.json({ reply: `⚠️ Erro no servidor: ${detalheErro}` });
+    console.error("Erro no servidor:", error.message);
+    return res.json({ reply: "⚠️ Ocorreu uma instabilidade no servidor. Tenta de novo!" });
   }
 });
 
