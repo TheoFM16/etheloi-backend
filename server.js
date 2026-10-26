@@ -8,22 +8,22 @@ app.use(express.json({ limit: '10mb' }));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Função de fallback priorizando o gemini-2.5-flash
+// Função de fallback testando os 3 modelos em sequência
 async function chamarGeminiComFallback(contents) {
-  const modelos = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const modelos = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
 
   for (const modelo of modelos) {
     try {
       const response = await axios.post(
         `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`,
         { contents: [{ role: "user", parts: contents }] },
-        { timeout: 12000 }
+        { timeout: 10000 }
       );
 
       const texto = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (texto) return texto;
     } catch (error) {
-      console.log(`Modelo ${modelo} falhou, testando próximo...`);
+      console.log(`Modelo ${modelo} indisponível, tentando o próximo...`);
     }
   }
   return null;
@@ -55,7 +55,7 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // 2. CHAT DE TEXTO COM O GEMINI 2.5
+    // 2. CHAT DE TEXTO COM OS 3 MODELOS
     let parts = [{ text: `Tu és o Etheloi, uma inteligência artificial avançada criada pelo Theo. Responde sempre em Português de forma direta, útil e amigável. Sê prestativo com programação, Roblox e jogos.\n\nUsuário: ${message}` }];
 
     if (image) {
@@ -75,7 +75,8 @@ app.post('/api/chat', async (req, res) => {
     if (respostaTexto) {
       return res.json({ reply: respostaTexto });
     } else {
-      return res.json({ reply: "⚠️ Os servidores estão ocupados no momento. Tenta enviar novamente!" });
+      // Se todos falharem, o Etheloi assume a resposta para nunca deixar o chat vazio
+      return res.json({ reply: "Opa, mestre! Os servidores da Google estão a recusar as chamadas agora mesmo por excesso de tráfego na chave. Tenta gerar uma nova API Key no Google AI Studio se persistir!" });
     }
 
   } catch (error) {
